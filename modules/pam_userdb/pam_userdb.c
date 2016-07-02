@@ -5,6 +5,11 @@
  * See the end of the file for Copyright Information
  */
 
+/*
+ * Modified by Flaz14 <flazfourteen> for the sake of
+ * individual gratification.
+ */
+
 #include "config.h"
 
 #include <stdio.h>
