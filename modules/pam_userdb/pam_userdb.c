@@ -6,8 +6,8 @@
  */
 
 /*
- * Modified by Flaz14 <flazfourteen> for the sake of
- * individual gratification.
+ * Modified by Flaz14 <flazfourteen> 2016/07/02
+ * for the sake of individual gratification.
  */
 
 #include "config.h"
