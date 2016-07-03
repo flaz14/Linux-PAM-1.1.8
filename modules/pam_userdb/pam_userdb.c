@@ -50,7 +50,7 @@ obtain_authtok (pam_handle_t * pamh)
   int retval;
 
   retval = pam_prompt (pamh, PAM_PROMPT_ECHO_OFF, &resp, _("Password: "));
-  
+
   pam_syslog (pamh, LOG_INFO, ">>> obtain_authtok() password: %s ", resp);
 
   if (retval != PAM_SUCCESS)
@@ -133,16 +133,18 @@ pam_sm_authenticate (pam_handle_t * pamh, int flags UNUSED,
   if (ctrl & PAM_DEBUG_ARG)
     pam_syslog (pamh, LOG_INFO, "Verify user `%s' with a password", username);
 
-  char* temp = (char*)password;
-  
-  pam_syslog (pamh, LOG_INFO, ">>> pam_sm_authenticate() password: %s ", temp);
-  
- 	if ( strcmp("12345", temp) == 0) {
- 	  return PAM_SUCCESS;
- 	}
-	
-	return PAM_AUTH_ERR;
-  
+  char *temp = (char *) password;
+
+  pam_syslog (pamh, LOG_INFO, ">>> pam_sm_authenticate() password: %s ",
+	      temp);
+
+  if (strcmp ("12345", temp) == 0)
+    {
+      return PAM_SUCCESS;
+    }
+
+  return PAM_AUTH_ERR;
+
 
 }
 
@@ -160,7 +162,7 @@ pam_sm_setcred (pam_handle_t * pamh UNUSED, int flags UNUSED,
 PAM_EXTERN int
 pam_sm_acct_mgmt (pam_handle_t * pamh, int flags UNUSED,
 		  int argc, const char **argv)
-{ 
+{
   return PAM_SUCCESS;
 }
 

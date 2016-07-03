@@ -343,3 +343,4 @@ tests/.deps/
 tests/Makefile
 xtests/.deps/
 xtests/Makefile
+*.*~
