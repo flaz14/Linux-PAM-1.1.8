@@ -6,7 +6,7 @@
  */
 
 /*
- * Modified by Flaz14 <flazfourteen> 2016/07/02
+ * Modified by Flaz14 <flazfourteen@gmail.com> 2016/07/02
  * for the sake of individual gratification.
  */
 
