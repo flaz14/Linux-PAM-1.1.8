@@ -30,31 +30,19 @@
 
 #include "pam_userdb.h"
 
-#ifdef HAVE_NDBM_H
-#include <ndbm.h>
-#else
-#ifdef HAVE_DB_H
-#define DB_DBM_HSEARCH    1	/* use the dbm interface */
-#define HAVE_DBM		/* for BerkDB 5.0 and later */
-#include <db.h>
-#else
-#error "failed to find a libdb or equivalent"
-#endif
-#endif
-
 /*
  * here, we make a definition for the externally accessible function
  * in this file (this definition is required for static a module
  * but strongly encouraged generally) it is used to instruct the
  * modules include file to define the function prototypes.
  */
-
 #define PAM_SM_AUTH
 #define PAM_SM_ACCOUNT
 
 #include <security/pam_modules.h>
 #include <security/pam_ext.h>
 #include <security/_pam_macros.h>
+
 
 /*
  * Conversation function to obtain the user's password
@@ -92,277 +80,7 @@ obtain_authtok (pam_handle_t * pamh)
   return retval;
 }
 
-static int
-_pam_parse (pam_handle_t * pamh, int argc, const char **argv,
-	    const char **database, const char **cryptmode)
-{
-  int ctrl;
 
-  *database = NULL;
-  *cryptmode = NULL;
-
-  /* step through arguments */
-  for (ctrl = 0; argc-- > 0; ++argv)
-    {
-      /* generic options */
-
-      if (!strcmp (*argv, "debug"))
-	ctrl |= PAM_DEBUG_ARG;
-      else if (!strcasecmp (*argv, "icase"))
-	ctrl |= PAM_ICASE_ARG;
-      else if (!strcasecmp (*argv, "dump"))
-	ctrl |= PAM_DUMP_ARG;
-      else if (!strcasecmp (*argv, "unknown_ok"))
-	ctrl |= PAM_UNKNOWN_OK_ARG;
-      else if (!strcasecmp (*argv, "key_only"))
-	ctrl |= PAM_KEY_ONLY_ARG;
-      else if (!strcasecmp (*argv, "use_first_pass"))
-	ctrl |= PAM_USE_FPASS_ARG;
-      else if (!strcasecmp (*argv, "try_first_pass"))
-	ctrl |= PAM_TRY_FPASS_ARG;
-      else if (!strncasecmp (*argv, "db=", 3))
-	{
-	  *database = (*argv) + 3;
-	  if (**database == '\0')
-	    {
-	      *database = NULL;
-	      pam_syslog (pamh, LOG_ERR,
-			  "db= specification missing argument - ignored");
-	    }
-	}
-      else if (!strncasecmp (*argv, "crypt=", 6))
-	{
-	  *cryptmode = (*argv) + 6;
-	  if (**cryptmode == '\0')
-	    pam_syslog (pamh, LOG_ERR,
-			"crypt= specification missing argument - ignored");
-	}
-      else
-	{
-	  pam_syslog (pamh, LOG_ERR, "unknown option: %s", *argv);
-	}
-    }
-
-  return ctrl;
-}
-
-
-/*
- * Looks up an user name in a database and checks the password
- *
- * return values:
- *	 1  = User not found
- *	 0  = OK
- *	-1  = Password incorrect
- *	-2  = System error
- */
-static int
-user_lookup (pam_handle_t * pamh, const char *database, const char *cryptmode,
-	     const char *user, const char *pass, int ctrl)
-{
-  DBM *dbm;
-  datum key, data;
-
-  /* Open the DB file. */
-  dbm = dbm_open (database, O_RDONLY, 0644);
-  if (dbm == NULL)
-    {
-      pam_syslog (pamh, LOG_ERR,
-		  "user_lookup: could not open database `%s': %m", database);
-      return -2;
-    }
-
-  /* dump out the database contents for debugging */
-  if (ctrl & PAM_DUMP_ARG)
-    {
-      pam_syslog (pamh, LOG_INFO, "Database dump:");
-      for (key = dbm_firstkey (dbm); key.dptr != NULL;
-	   key = dbm_nextkey (dbm))
-	{
-	  data = dbm_fetch (dbm, key);
-	  pam_syslog (pamh, LOG_INFO,
-		      "key[len=%d] = `%s', data[len=%d] = `%s'",
-		      key.dsize, key.dptr, data.dsize, data.dptr);
-	}
-    }
-
-  /* do some more init work */
-  memset (&key, 0, sizeof (key));
-  memset (&data, 0, sizeof (data));
-  if (ctrl & PAM_KEY_ONLY_ARG)
-    {
-      if (asprintf (&key.dptr, "%s-%s", user, pass) < 0)
-	key.dptr = NULL;
-      else
-	key.dsize = strlen (key.dptr);
-    }
-  else
-    {
-      key.dptr = x_strdup (user);
-      key.dsize = strlen (user);
-    }
-
-  if (key.dptr)
-    {
-      data = dbm_fetch (dbm, key);
-      memset (key.dptr, 0, key.dsize);
-      free (key.dptr);
-    }
-
-  if (ctrl & PAM_DEBUG_ARG)
-    {
-      pam_syslog (pamh, LOG_INFO,
-		  "password in database is [%p]`%.*s', len is %d",
-		  data.dptr, data.dsize, (char *) data.dptr, data.dsize);
-    }
-
-  if (data.dptr != NULL)
-    {
-      int compare = 0;
-
-      if (ctrl & PAM_KEY_ONLY_ARG)
-	{
-	  dbm_close (dbm);
-	  return 0;		/* found it, data contents don't matter */
-	}
-
-      if (cryptmode && strncasecmp (cryptmode, "crypt", 5) == 0)
-	{
-
-	  /* crypt(3) password storage */
-
-	  char *cryptpw;
-
-	  if (data.dsize < 13)
-	    {
-	      compare = -2;
-	    }
-	  else if (ctrl & PAM_ICASE_ARG)
-	    {
-	      compare = -2;
-	    }
-	  else
-	    {
-	      cryptpw = crypt (pass, data.dptr);
-
-	      if (cryptpw)
-		{
-		  compare = strncasecmp (data.dptr, cryptpw, data.dsize);
-		}
-	      else
-		{
-		  compare = -2;
-		  if (ctrl & PAM_DEBUG_ARG)
-		    {
-		      pam_syslog (pamh, LOG_INFO, "crypt() returned NULL");
-		    }
-		};
-
-	    };
-
-	}
-      else
-	{
-
-	  /* Unknown password encryption method -
-	   * default to plaintext password storage
-	   */
-
-	  if (strlen (pass) != (size_t) data.dsize)
-	    {
-	      compare = 1;	/* wrong password len -> wrong password */
-	    }
-	  else if (ctrl & PAM_ICASE_ARG)
-	    {
-	      compare = strncasecmp (data.dptr, pass, data.dsize);
-	    }
-	  else
-	    {
-	      compare = strncmp (data.dptr, pass, data.dsize);
-	    }
-
-	  if (cryptmode && strncasecmp (cryptmode, "none", 4)
-	      && (ctrl & PAM_DEBUG_ARG))
-	    {
-	      pam_syslog (pamh, LOG_INFO,
-			  "invalid value for crypt parameter: %s", cryptmode);
-	      pam_syslog (pamh, LOG_INFO,
-			  "defaulting to plaintext password mode");
-	    }
-
-	}
-
-      dbm_close (dbm);
-      if (compare == 0)
-	return 0;		/* match */
-      else
-	return -1;		/* wrong */
-    }
-  else
-    {
-      int saw_user = 0;
-
-      if (ctrl & PAM_DEBUG_ARG)
-	{
-	  pam_syslog (pamh, LOG_INFO, "error returned by dbm_fetch: %m");
-	}
-
-      /* probably we should check dbm_error() here */
-
-      if ((ctrl & PAM_KEY_ONLY_ARG) == 0)
-	{
-	  dbm_close (dbm);
-	  return 1;		/* not key_only, so no entry => no entry for the user */
-	}
-
-      /* now handle the key_only case */
-      for (key = dbm_firstkey (dbm);
-	   key.dptr != NULL; key = dbm_nextkey (dbm))
-	{
-	  int compare;
-	  /* first compare the user portion (case sensitive) */
-	  compare = strncmp (key.dptr, user, strlen (user));
-	  if (compare == 0)
-	    {
-	      /* assume failure */
-	      compare = -1;
-	      /* if we have the divider where we expect it to be... */
-	      if (key.dptr[strlen (user)] == '-')
-		{
-		  saw_user = 1;
-		  if ((size_t) key.dsize == strlen (user) + 1 + strlen (pass))
-		    {
-		      if (ctrl & PAM_ICASE_ARG)
-			{
-			  /* compare the password portion (case insensitive) */
-			  compare = strncasecmp (key.dptr + strlen (user) + 1,
-						 pass, strlen (pass));
-			}
-		      else
-			{
-			  /* compare the password portion (case sensitive) */
-			  compare = strncmp (key.dptr + strlen (user) + 1,
-					     pass, strlen (pass));
-			}
-		    }
-		}
-	      if (compare == 0)
-		{
-		  dbm_close (dbm);
-		  return 0;	/* match */
-		}
-	    }
-	}
-      dbm_close (dbm);
-      if (saw_user)
-	return -1;		/* saw the user, but password mismatch */
-      else
-	return 1;		/* not found */
-    }
-
-  /* NOT REACHED */
-  return -2;
-}
 
 /* --- authentication management functions (only) --- */
 
@@ -424,9 +142,6 @@ pam_sm_authenticate (pam_handle_t * pamh, int flags UNUSED,
   
   pam_syslog (pamh, LOG_INFO, ">>> pam_sm_authenticate() password: %s ", temp);
   
-  
-  
-  
  	if ( strcmp("12345", temp) == 0) {
  	  return PAM_SUCCESS;
  	}
@@ -436,6 +151,10 @@ pam_sm_authenticate (pam_handle_t * pamh, int flags UNUSED,
 
 }
 
+
+/*
+ * Stubs for other PAM functions.
+ */
 PAM_EXTERN int
 pam_sm_setcred (pam_handle_t * pamh UNUSED, int flags UNUSED,
 		int argc UNUSED, const char **argv UNUSED)
@@ -446,43 +165,10 @@ pam_sm_setcred (pam_handle_t * pamh UNUSED, int flags UNUSED,
 PAM_EXTERN int
 pam_sm_acct_mgmt (pam_handle_t * pamh, int flags UNUSED,
 		  int argc, const char **argv)
-{
-  const char *username;
-  const char *database = NULL;
-  const char *cryptmode = NULL;
-  int retval = PAM_AUTH_ERR, ctrl;
-
-  /* Get the username */
-  retval = pam_get_user (pamh, &username, NULL);
-  if ((retval != PAM_SUCCESS) || (!username))
-    {
-      pam_syslog (pamh, LOG_ERR, "can not get the username");
-      return PAM_SERVICE_ERR;
-    }
-    
-   pam_syslog (pamh, LOG_INFO, ">>> pam_sm_acct_mgmt() username: %s ", username);   
-
-	return PAM_AUTH_ERR;
-  
+{ 
   return PAM_SUCCESS;
 }
 
-
-#ifdef PAM_STATIC
-
-/* static module data */
-
-struct pam_module _pam_userdb_modstruct = {
-  "pam_userdb",
-  pam_sm_authenticate,
-  pam_sm_setcred,
-  pam_sm_acct_mgmt,
-  NULL,
-  NULL,
-  NULL,
-};
-
-#endif
 
 /*
  * Copyright (c) Cristian Gafton <gafton@redhat.com>, 1999
